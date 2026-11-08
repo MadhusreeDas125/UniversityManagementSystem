@@ -9,66 +9,81 @@
     String enrollNo = (String) session.getAttribute("enrollment_no");
     int studentId = (Integer) session.getAttribute("user_id");
     int deptId = (Integer) session.getAttribute("dept_id");
+    java.util.List<String[]> attendanceRows = new java.util.ArrayList<>();
+    java.util.List<String[]> gradeRows = new java.util.ArrayList<>();
+    long attendedSum=0, totalSum=0;
+    try (Connection c=DatabaseConnection.initializeDatabase(); PreparedStatement ps=c.prepareStatement("SELECT * FROM attendance WHERE student_id=?")) {
+        ps.setInt(1,studentId);
+        try(ResultSet r=ps.executeQuery()){while(r.next()){
+            int a=r.getInt("attended_classes"), t=r.getInt("total_classes");
+            attendedSum+=a; totalSum+=t;
+            attendanceRows.add(new String[]{r.getString("subject"),a+" / "+t,String.format(java.util.Locale.US,"%.1f%%",t>0?100.0*a/t:0)});
+        }}
+    } catch(Exception ignored){}
+    try (Connection c=DatabaseConnection.initializeDatabase(); PreparedStatement ps=c.prepareStatement("SELECT * FROM grades WHERE student_id=? ORDER BY semester")) {
+        ps.setInt(1,studentId);
+        try(ResultSet r=ps.executeQuery()){while(r.next()){
+            gradeRows.add(new String[]{r.getString("semester"),String.valueOf(r.getDouble("sgpa")),String.valueOf(r.getDouble("cgpa"))});
+        }}
+    } catch(Exception ignored){}
+    double attendancePct=totalSum>0?100.0*attendedSum/totalSum:0;
+    double latestCgpa=gradeRows.isEmpty()?0:Double.parseDouble(gradeRows.get(gradeRows.size()-1)[2]);
+    StringBuilder points=new StringBuilder();
+    for(int i=0;i<gradeRows.size();i++){
+        double cg=Double.parseDouble(gradeRows.get(i)[2]);
+        double x=gradeRows.size()==1?450:65.0+i*770/(gradeRows.size()-1);
+        double y=225-Math.max(0,Math.min(10,cg))*18;
+        if(i>0)points.append(" ");
+        points.append(String.format(java.util.Locale.US,"%.1f,%.1f",x,y));
+    }
 %>
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Student Portal - University Management System</title>
     <link rel="stylesheet" type="text/css" href="css/style.css">
 </head>
-<body>
-    <header>
-        <h1>Student Portal</h1>
-        <a href="index.jsp" class="btn logout-btn">Logout</a>
-    </header>
-    <div class="container">
-        <h2>Welcome, <%= studentName %></h2>
-        <p><strong>Enrollment Number:</strong> <%= enrollNo %></p>
-
-        <h3>Attendance Overview</h3>
-        <table>
-            <tr><th>Subject</th><th>Attended / Total Classes</th><th>Percentage</th></tr>
-            <%
-                try (Connection conn = DatabaseConnection.initializeDatabase()) {
-                    PreparedStatement pst = conn.prepareStatement("SELECT * FROM attendance WHERE student_id=?");
-                    pst.setInt(1, studentId);
-                    ResultSet rs = pst.executeQuery();
-                    while(rs.next()) {
-                        int att = rs.getInt("attended_classes");
-                        int tot = rs.getInt("total_classes");
-                        double pct = tot > 0 ? ((double)att / tot) * 100 : 0.0;
-            %>
-            <tr>
-                <td><%= rs.getString("subject") %></td>
-                <td><%= att %> / <%= tot %></td>
-                <td><%= String.format("%.2f", pct) %>%</td>
-            </tr>
-            <%      }
-                } catch(Exception e) { out.println("<tr><td colspan='3'>No attendance recorded yet.</td></tr>"); }
-            %>
-        </table>
-
-        <h3>Semester Grade Graph / Table (SGPA / CGPA)</h3>
-        <table>
-            <tr><th>Semester</th><th>SGPA</th><th>CGPA</th></tr>
-            <%
-                try (Connection conn = DatabaseConnection.initializeDatabase()) {
-                    PreparedStatement pst = conn.prepareStatement("SELECT * FROM grades WHERE student_id=?");
-                    pst.setInt(1, studentId);
-                    ResultSet rs = pst.executeQuery();
-                    while(rs.next()) {
-            %>
-            <tr>
-                <td><%= rs.getString("semester") %></td>
-                <td><%= rs.getDouble("sgpa") %></td>
-                <td><%= rs.getDouble("cgpa") %></td>
-            </tr>
-            <%      }
-                } catch(Exception e) { out.println("<tr><td colspan='3'>No grades published yet.</td></tr>"); }
-            %>
-        </table>
-
-        <h3>Daily Class Routine (Course-wise)</h3>
+<body class="student-page">
+    <header class="portal-header"><div class="header-inner">
+        <div class="brand"><span class="brand-icon">U</span><div><strong>University Management System</strong><small>University Management System</small></div></div>
+        <div class="header-right"><span class="role-pill">Student Portal</span><a href="index.jsp" class="btn logout-btn">Sign out</a></div>
+    </div></header>
+    <main class="container student-container">
+        <section class="welcome-panel"><div><span class="eyebrow">STUDENT DASHBOARD</span><h1>Welcome back, <%= studentName %></h1><p>Here's your academic overview at a glance.</p></div><div class="enrollment-chip"><small>ENROLLMENT NUMBER</small><strong><%= enrollNo %></strong></div></section>
+        <div class="stats-grid">
+            <div class="stat-card"><span>Overall attendance</span><strong><%= String.format(java.util.Locale.US,"%.1f%%",attendancePct) %></strong><small>Across all recorded subjects</small></div>
+            <div class="stat-card"><span>Current CGPA</span><strong><%= gradeRows.isEmpty()?"—":String.format(java.util.Locale.US,"%.2f",latestCgpa) %></strong><small>Out of 10.00</small></div>
+            <div class="stat-card"><span>Semesters recorded</span><strong><%= gradeRows.size() %></strong><small>Academic progress</small></div>
+            <div class="stat-card"><span>Classes attended</span><strong><%= attendedSum %><span class="stat-total"> / <%= totalSum %></span></strong><small>Total recorded classes</small></div>
+        </div>
+        <div class="analytics-grid">
+            <section class="dashboard-panel"><div class="section-heading"><div><span class="eyebrow">ATTENDANCE</span><h2>Attendance overview</h2></div></div>
+                <div class="donut-wrap"><div class="donut" style="--pct:<%= String.format(java.util.Locale.US,"%.2f",attendancePct) %>"><div class="donut-center"><strong><%= String.format(java.util.Locale.US,"%.1f%%",attendancePct) %></strong><small>Attendance</small></div></div><div class="chart-legend"><div><i class="legend-dot present"></i> Attended <strong><%= attendedSum %></strong></div><div><i class="legend-dot absent"></i> Missed <strong><%= Math.max(0,totalSum-attendedSum) %></strong></div></div></div>
+                <div class="table-scroll"><table><thead><tr><th>Subject</th><th>Attended / Total</th><th>Attendance</th></tr></thead><tbody>
+                <% if(attendanceRows.isEmpty()){ %><tr><td colspan="3" class="empty-state">No attendance recorded yet.</td></tr><% }else{for(String[] row:attendanceRows){ %>
+                <tr><td><%= row[0] %></td><td><%= row[1] %></td><td><span class="percent-pill"><%= row[2] %></span></td></tr>
+                <% }} %></tbody></table></div>
+            </section>
+            <section class="dashboard-panel"><div class="section-heading"><div><span class="eyebrow">ACADEMICS</span><h2>CGPA performance</h2></div><span class="subtle-label">Semester trend</span></div>
+                <% if(!gradeRows.isEmpty()){ %>
+                <div class="line-chart"><svg viewBox="0 0 900 270" role="img" aria-label="CGPA progression by semester" preserveAspectRatio="xMidYMid meet">
+                    <% for(int tick=0;tick<=5;tick++){int y=225-tick*36; %><line x1="55" y1="<%= y %>" x2="850" y2="<%= y %>" stroke="#e8edf5" stroke-width="1"/><text x="42" y="<%= y+4 %>" text-anchor="end" fill="#8490a5" font-size="13"><%= tick*2 %></text><% } %>
+                    <polyline points="<%= points.toString() %>" fill="none" stroke="#5468e7" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+                    <% for(int i=0;i<gradeRows.size();i++){double x=gradeRows.size()==1?450:65.0+i*770/(gradeRows.size()-1);double y=225-Math.max(0,Math.min(10,Double.parseDouble(gradeRows.get(i)[2])))*18; %>
+                    <circle cx="<%= x %>" cy="<%= y %>" r="6" fill="#5468e7" stroke="white" stroke-width="3"><title><%= gradeRows.get(i)[0] %>: <%= gradeRows.get(i)[2] %></title></circle>
+                    <text x="<%= x %>" y="252" text-anchor="middle" fill="#64748b" font-size="12"><%= gradeRows.get(i)[0] %></text>
+                    <% } %>
+                </svg></div>
+                <% }else{ %><div class="chart-empty">Your CGPA trend will appear when grades are published.</div><% } %>
+                <div class="table-scroll"><table><thead><tr><th>Semester</th><th>SGPA</th><th>CGPA</th></tr></thead><tbody>
+                <% if(gradeRows.isEmpty()){ %><tr><td colspan="3" class="empty-state">No grades published yet.</td></tr><% }else{for(String[] row:gradeRows){ %>
+                <tr><td><%= row[0] %></td><td><%= row[1] %></td><td><strong><%= row[2] %></strong></td></tr>
+                <% }} %></tbody></table></div>
+            </section>
+        </div>
+        <div class="student-sections">
+        <section class="dashboard-panel"><h2>Daily class routine</h2>
         <table>
             <tr><th>Day</th><th>Time Slot</th><th>Subject</th><th>Faculty</th></tr>
             <%
@@ -89,7 +104,7 @@
             %>
         </table>
 
-        <h3>Side Desk: Course Syllabus (Semester-wise)</h3>
+        </section><section class="dashboard-panel"><h2>Course syllabus</h2>
         <table>
             <tr><th>Semester</th><th>Subject</th><th>Syllabus Details</th></tr>
             <%
@@ -109,8 +124,8 @@
             %>
         </table>
 
-        <h3>Side Desk: Tuition Fee Payment Method</h3>
-        <form action="StudentServlet" method="post" style="background:#f8fafc; padding:15px; border:1px solid #cbd5e1; border-radius:4px;">
+        </section><section class="dashboard-panel"><h2>Tuition fee payment</h2>
+        <form action="StudentServlet" method="post" class="payment-form">
             <input type="hidden" name="action" value="pay_fee">
             <div class="form-group">
                 <label>Select Semester:</label>
@@ -131,7 +146,7 @@
             <button type="submit">Submit Fee Payment</button>
         </form>
 
-        <h3>Notification Box</h3>
+        </section><section class="dashboard-panel"><h2>Latest notifications</h2>
         <ul>
             <%
                 try (Connection conn = DatabaseConnection.initializeDatabase()) {
@@ -143,7 +158,7 @@
             <%      }
                 } catch(Exception e) { out.println("<li>No notifications available.</li>"); }
             %>
-        </ul>
-    </div>
+        </ul></section></div>
+    </main>
 </body>
 </html>
